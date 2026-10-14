@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/uair10/url_shortener_go/internal/httpapi/middleware"
 	"github.com/uair10/url_shortener_go/internal/infrastructure/config"
 )
 
@@ -39,11 +40,20 @@ func New(logger *slog.Logger, cfg config.Server) *Server {
 func newHandler(logger *slog.Logger, maxBodyBytes int64) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
+	return withMiddleware(mux, logger, maxBodyBytes)
+}
 
+// withMiddleware оборачивает роутер в middleware. Тесты передают сюда свой mux.
+func withMiddleware(mux *http.ServeMux, logger *slog.Logger, maxBodyBytes int64) http.Handler {
 	// middleware оборачивают mux изнутри наружу
-	var handler http.Handler = mux
+	handler := notFoundAsProblem(mux)
+	// MaxBytesHandler только ограничивает r.Body. 413 отдаёт хендлер,
+	// когда при чтении тела получает *http.MaxBytesError.
 	handler = http.MaxBytesHandler(handler, maxBodyBytes)
-	handler = logRequests(logger)(handler)
+	// Recover внутри AccessLog: после паники access log пишется со статусом 500.
+	handler = middleware.Recover(handler)
+	handler = middleware.AccessLog(handler)
+	handler = middleware.RequestID(logger)(handler) // самый первый
 	return handler
 }
 
