@@ -1,14 +1,18 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/uair10/url_shortener_go/internal/httpapi/requestid"
 	"github.com/uair10/url_shortener_go/internal/infrastructure/config"
 )
 
@@ -100,6 +104,162 @@ func TestServerRoutes(t *testing.T) {
 			}
 			if got := rec.Header().Get("Allow"); tt.wantAllow != "" && got != tt.wantAllow {
 				t.Errorf("Allow = %q, want %q", got, tt.wantAllow)
+			}
+		})
+	}
+}
+
+// accessLog - поля строки access log, которые проверяют тесты.
+type accessLog struct {
+	Msg        string   `json:"msg"`
+	Method     string   `json:"method"`
+	Path       string   `json:"path"`
+	Status     int      `json:"status"`
+	DurationMS *float64 `json:"duration_ms"`
+}
+
+func TestLogRequests(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		method     string
+		target     string
+		body       string
+		wantPath   string
+		wantStatus int
+		secret     string // не должно попасть в лог
+	}{
+		{
+			name:       "успешный запрос",
+			method:     http.MethodGet,
+			target:     "/healthz",
+			wantPath:   "/healthz",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "404 и query-строка не в логе",
+			method:     http.MethodGet,
+			target:     "/unknown?token=secret-token",
+			wantPath:   "/unknown",
+			wantStatus: http.StatusNotFound,
+			secret:     "secret-token",
+		},
+		{
+			name:       "405 и тело не в логе",
+			method:     http.MethodPost,
+			target:     "/healthz",
+			body:       `{"password":"secret-password"}`,
+			wantPath:   "/healthz",
+			wantStatus: http.StatusMethodNotAllowed,
+			secret:     "secret-password",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+			handler := newHandler(slog.New(slog.NewJSONHandler(&buf, nil)), 1024)
+
+			req := httptest.NewRequestWithContext(t.Context(), tt.method, tt.target, strings.NewReader(tt.body))
+			handler.ServeHTTP(httptest.NewRecorder(), req)
+
+			var got accessLog
+			if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+				t.Fatalf("log is not one JSON line: %v\n%s", err, buf.String())
+			}
+			if got.DurationMS == nil {
+				t.Error("duration_ms is missing")
+			}
+			got.DurationMS = nil // время каждый раз разное, сравниваем остальное
+
+			want := accessLog{Msg: "request", Method: tt.method, Path: tt.wantPath, Status: tt.wantStatus}
+			if got != want {
+				t.Errorf("log entry = %+v, want %+v", got, want)
+			}
+			if tt.secret != "" && strings.Contains(buf.String(), tt.secret) {
+				t.Errorf("log contains %q: %s", tt.secret, buf.String())
+			}
+		})
+	}
+}
+
+func TestRecover(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", healthz)
+	mux.HandleFunc("GET /panic", func(http.ResponseWriter, *http.Request) { panic("boom") })
+	handler := withMiddleware(mux, slog.New(slog.NewJSONHandler(&buf, nil)), 1024)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/panic", http.NoBody))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if got := decodeProblem(t, rec)["code"]; got != "internal" {
+		t.Errorf("code = %v, want internal", got)
+	}
+
+	// Access log пишется и для паники - со статусом 500.
+	var logged bool
+	for line := range bytes.Lines(buf.Bytes()) {
+		var entry accessLog
+		if json.Unmarshal(line, &entry) == nil && entry.Msg == "request" {
+			logged = true
+			if entry.Status != http.StatusInternalServerError {
+				t.Errorf("access log status = %d, want 500", entry.Status)
+			}
+		}
+	}
+	if !logged {
+		t.Errorf("no access log line after panic:\n%s", buf.String())
+	}
+
+	// Сервер продолжает работать.
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Errorf("next request status = %d, want 200", rec.Code)
+	}
+}
+
+func TestRequestIDHeader(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		incoming string
+		wantSame bool
+	}{
+		{"валидный используется как есть", "abc-123-XYZ", true},
+		{"без ID генерируется", "", false},
+		{"недопустимые символы", "abc\nfake-log-line", false},
+		{"длиннее 64", strings.Repeat("a", 65), false},
+	}
+
+	handler := newHandler(slog.New(slog.DiscardHandler), 1024)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", http.NoBody)
+			if tt.incoming != "" {
+				req.Header.Set(requestid.Header, tt.incoming)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			got := rec.Header().Get(requestid.Header)
+			if tt.wantSame && got != tt.incoming {
+				t.Errorf("%s = %q, want %q", requestid.Header, got, tt.incoming)
+			}
+			if !tt.wantSame && (got == tt.incoming || !requestid.Valid(got)) {
+				t.Errorf("%s = %q, want new valid id", requestid.Header, got)
 			}
 		})
 	}
