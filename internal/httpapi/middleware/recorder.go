@@ -2,12 +2,13 @@ package middleware
 
 import "net/http"
 
-// responseRecorder запоминает статус ответа и то, что ответ уже начат:
+// responseRecorder запоминает статус ответа, размер тела и то, что ответ уже начат:
 // http.ResponseWriter этого не отдаёт.
 type responseRecorder struct {
 	http.ResponseWriter
 
 	status      int
+	bytes       int64
 	wroteHeader bool
 }
 
@@ -32,8 +33,10 @@ func (r *responseRecorder) Write(p []byte) (int, error) {
 	if !r.wroteHeader {
 		r.WriteHeader(http.StatusOK)
 	}
-	// Ошибку writer отдаём как есть: вызывающий код может сравнивать её напрямую.
-	return r.ResponseWriter.Write(p) //nolint:wrapcheck // обёртка writer, а не граница слоя.
+	n, err := r.ResponseWriter.Write(p)
+	r.bytes += int64(n)
+	// Ошибку writer отдаем как есть: вызывающий код может сравнивать ее напрямую.
+	return n, err //nolint:wrapcheck // обертка writer, а не граница слоя.
 }
 
 // Unwrap нужен http.ResponseController, чтобы добраться до исходного writer (Flush, дедлайны).
