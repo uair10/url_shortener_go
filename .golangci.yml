@@ -4,63 +4,49 @@ run:
   timeout: 5m
 
 linters:
-  default: standard # errcheck, govet, ineffassign, staticcheck, unused
-  enable:
-    # Ошибки
-    - errorlint # errors.Is/As вместо ==, %w при оборачивании
-    - wrapcheck # ошибки из чужих пакетов надо оборачивать контекстом
-    - nilerr # return nil при err != nil
-    - nilnil # return nil, nil
-    - errname # ErrXxx для sentinel, XxxError для типов
-    # Ресурсы и контекст
-    - bodyclose # незакрытый resp.Body
-    - sqlclosecheck # незакрытые sql.Rows/Stmt
-    - rowserrcheck # не проверен rows.Err()
-    - noctx # HTTP/SQL без context.Context
-    - contextcheck # потерянный context
-    - containedctx # context внутри struct
-    # Корректность
-    - exhaustive # switch по enum покрывает все значения
-    - gosec # безопасность
-    - copyloopvar
-    - durationcheck
-    - forcetypeassert # x.(T) без ok
-    - musttag # json/yaml теги у сериализуемых структур
-    # Стиль и чистота
-    - revive
-    - gocritic
-    - misspell
-    - unconvert
-    - unparam
-    - usestdlibvars
-    - perfsprint
-    - prealloc
-    - intrange # for i := range n (Go 1.22+)
-    - predeclared # переменная с именем len, new, ...
-    - modernize # современные конструкции языка и stdlib (min/max, slices, maps, ...)
-    - exptostd # golang.org/x/exp -> stdlib
-    - iface # лишние и дублирующиеся интерфейсы
-    - recvcheck # receiver одного типа: либо везде указатель, либо везде значение
-    - nilnesserr # проверили err, но вернули другую ошибку
-    - fatcontext # вложенные context в циклах
-    - errchkjson # json.Marshal несериализуемых типов
-    - canonicalheader # http.Header с неканоническими ключами
-    - sloglint # единый стиль log/slog
-    - gocheckcompilerdirectives
-    - nolintlint # //nolint только с причиной
-    - godot # комментарии заканчиваются точкой
-    # Сложность
-    - gocognit
-    - cyclop
-    - nestif
-    - funlen
-    # Тесты
-    - thelper
-    - tparallel
-    - testifylint
-    - usetesting
+  # Все включено, отключено только лишнее. Новые линтеры при обновлении
+  # golangci-lint включатся сами (версия зафиксирована в pre-commit).
+  default: all
+  disable:
+    # Дубли
+    - gocyclo # есть cyclop и gocognit
+    # Слишком шумные / спорные
+    - exhaustruct # требует заполнять все поля struct-литерала
+    - exhaustruct_v5
+    - varnamelen # запрещает короткие имена (i, w, r) - противоречит Go-стилю
+    - wsl # пустые строки вокруг блоков
+    - wsl_v5
+    - nlreturn # пустая строка перед return
+    - noinlineerr # запрещает идиоматичный if err := f(); err != nil
+    - lll # длина строки
+    - tagalign # выравнивание тегов
+    - godox # TODO/FIXME в коде
+    - testpackage # заставляет писать тесты только в package xxx_test
+    - gosmopolitan # ругается на кириллицу в строках
+    - depguard # без своего списка запретов бесполезен
+    # Устаревшие (deprecated), заменены версиями _v2/_v5
+    - gomodguard
 
   settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    staticcheck:
+      checks: ["all"]
+    errcheck:
+      check-type-assertions: true
+    gosec:
+      severity: low
+      confidence: low
+    forbidigo:
+      forbid:
+        - pattern: ^(fmt\.Print(f|ln)?|print|println)$
+          msg: используй log/slog
+    tagliatelle:
+      case:
+        rules:
+          json: snake
     gocognit:
       min-complexity: 20
     cyclop:
@@ -78,30 +64,49 @@ linters:
     gocritic:
       enabled-tags: [diagnostic, style, performance]
       disabled-checks:
-        - hugeParam # шумит на новичковом коде
+        - hugeParam
         - unnamedResult
     revive:
+      # Все правила, кроме дублей других линтеров и шумных
+      enable-all-rules: true
       rules:
-        - name: exported
-        - name: package-comments
-        - name: var-naming
-        - name: receiver-naming
-        - name: error-return
-        - name: error-strings
-        - name: error-naming
-        - name: increment-decrement
-        - name: indent-error-flow
-        - name: early-return
-        - name: superfluous-else
-        - name: unused-parameter
-        - name: unexported-return
-        - name: context-as-argument
-        - name: context-keys-type
-        - name: blank-imports
-        - name: dot-imports
-        - name: range
-        - name: time-naming
-        - name: errorf
+        # Дубли
+        - name: add-constant # mnd
+          disabled: true
+        - name: cognitive-complexity # gocognit
+          disabled: true
+        - name: cyclomatic # cyclop
+          disabled: true
+        - name: function-length # funlen
+          disabled: true
+        - name: line-length-limit # lll отключён
+          disabled: true
+        - name: unhandled-error # errcheck
+          disabled: true
+        - name: max-control-nesting # nestif
+          disabled: true
+        # Шумные
+        - name: max-public-structs
+          disabled: true
+        - name: banned-characters
+          disabled: true
+        - name: file-header
+          disabled: true
+        - name: function-result-limit
+          disabled: true
+        - name: argument-limit
+          disabled: true
+        - name: flag-parameter
+          disabled: true
+        - name: import-alias-naming
+          disabled: true
+        # Подстройка
+        - name: defer # recover() в функции, вызванной через defer f(), - нормальный паттерн
+          arguments: [[call-chain, loop, method-call, return, immediate-recover]]
+        - name: unchecked-type-assertion # явный `v, _ :=` - осознанный игнор
+          arguments: [{acceptIgnoredAssertionResult: true}]
+        - name: enforce-switch-style # default в switch не обязателен
+          arguments: [allowNoDefault]
 
   exclusions:
     presets:
@@ -109,7 +114,7 @@ linters:
     rules:
       # В тестах можно длинные функции и без оборачивания ошибок
       - path: _test\.go
-        linters: [funlen, wrapcheck, gosec, forcetypeassert]
+        linters: [funlen, wrapcheck, gosec, forcetypeassert, err113, mnd, goconst, dupl, maintidx]
 
 formatters:
   enable:
@@ -117,7 +122,7 @@ formatters:
     - goimports
   settings:
     gofumpt:
-      module-path: url-shortener
+      module-path: github.com/uair10/url_shortener_go
       extra:
         group-params: true
     goimports:

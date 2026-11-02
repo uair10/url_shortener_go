@@ -275,7 +275,11 @@ func TestServerListenPortBusy(t *testing.T) {
 		t.Fatalf("listen: %v", err)
 	}
 	t.Cleanup(func() { _ = busy.Close() })
-	port := busy.Addr().(*net.TCPAddr).Port
+	addr, ok := busy.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("Addr() = %T, want *net.TCPAddr", busy.Addr())
+	}
+	port := addr.Port
 
 	err = newTestServer(t, port).Listen(t.Context())
 	if err == nil {

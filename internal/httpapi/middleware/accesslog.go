@@ -25,7 +25,7 @@ func logRequest(r *http.Request, rec *responseRecorder, start time.Time) {
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
 		slog.Int("status", rec.status),
-		slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
+		slog.Float64("duration_ms", float64(time.Since(start))/float64(time.Millisecond)),
 	}
 
 	// Ответ оборван паникой (обычно http.ErrAbortHandler): отмечаем и пропускаем панику дальше.

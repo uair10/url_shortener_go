@@ -7,14 +7,34 @@ import (
 	"testing"
 )
 
-// Каждый код из таблицы собирается в проблему с его статусом и code.
+// Каждый код собирается в проблему со своим статусом и code.
 func TestNewAllCodes(t *testing.T) {
 	t.Parallel()
 
-	for code, info := range codes {
-		p := New(code, "")
-		if p.Code != string(code) || p.Status != info.status || p.Title == "" || p.Type != code.TypeURI() {
-			t.Errorf("New(%q) = %+v", code, p)
+	tests := []struct {
+		code   Code
+		status int
+	}{
+		{CodeMalformedJSON, http.StatusBadRequest},
+		{CodeInvalidQuery, http.StatusBadRequest},
+		{CodeValidationFailed, http.StatusUnprocessableEntity},
+		{CodeUnauthorized, http.StatusUnauthorized},
+		{CodeForbidden, http.StatusForbidden},
+		{CodeQuotaExceeded, http.StatusForbidden},
+		{CodeNotFound, http.StatusNotFound},
+		{CodeMethodNotAllowed, http.StatusMethodNotAllowed},
+		{CodeAliasTaken, http.StatusConflict},
+		{CodeEmailTaken, http.StatusConflict},
+		{CodeLinkGone, http.StatusGone},
+		{CodePayloadTooLarge, http.StatusRequestEntityTooLarge},
+		{CodeUnsupportedMediaType, http.StatusUnsupportedMediaType},
+		{CodeRateLimited, http.StatusTooManyRequests},
+		{CodeInternal, http.StatusInternalServerError},
+	}
+	for _, tt := range tests {
+		p := New(tt.code, "")
+		if p.Code != string(tt.code) || p.Status != tt.status || p.Title == "" || p.Type != tt.code.TypeURI() {
+			t.Errorf("New(%q) = %+v, want status %d", tt.code, p, tt.status)
 		}
 	}
 }

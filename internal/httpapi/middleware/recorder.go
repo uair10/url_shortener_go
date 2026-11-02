@@ -6,6 +6,7 @@ import "net/http"
 // http.ResponseWriter этого не отдаёт.
 type responseRecorder struct {
 	http.ResponseWriter
+
 	status      int
 	wroteHeader bool
 }

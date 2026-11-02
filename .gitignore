@@ -7,3 +7,4 @@ coverage.out
 .idea/shelf/
 .DS_Store
 .env
+.mcp.json

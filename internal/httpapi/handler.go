@@ -45,14 +45,14 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p, ok := errors.AsType[*problem.Problem](err); ok {
 		// Уровень лога - по статусу.
 		switch {
-		case p.Status >= 500:
+		case p.Status >= http.StatusInternalServerError:
 			logger.ErrorContext(ctx, "request failed",
 				slog.String("code", p.Code),
 				slog.Int("status", p.Status),
 				slog.String("detail", p.Detail),
 				slog.Any("err", err),
 			)
-		case p.Status >= 400:
+		case p.Status >= http.StatusBadRequest:
 			logger.InfoContext(ctx, "request rejected",
 				slog.String("code", p.Code),
 				slog.Int("status", p.Status),

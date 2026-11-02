@@ -91,7 +91,7 @@ func TestLoad(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := load(env.Options{Environment: tt.env})
+			got, err := loadWithOpts(env.Options{Environment: tt.env})
 
 			if len(tt.wantErrs) > 0 {
 				assertErrContains(t, err, tt.wantErrs)

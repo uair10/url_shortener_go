@@ -1,7 +1,10 @@
 // Package problem отдаёт ошибки API в формате RFC 9457 Problem Details.
 package problem
 
-import "strings"
+import (
+	"net/http"
+	"strings"
+)
 
 // Code - машиночитаемый код ошибки, отдаётся в поле "code".
 type Code string
@@ -34,22 +37,23 @@ type codeInfo struct {
 }
 
 // codes - единственный источник истины для HTTP-статуса и заголовка.
-var codes = map[Code]codeInfo{
-	CodeMalformedJSON:        {400, "Malformed JSON"},
-	CodeInvalidQuery:         {400, "Invalid Query"},
-	CodeValidationFailed:     {422, "Validation Failed"},
-	CodeUnauthorized:         {401, "Unauthorized"},
-	CodeForbidden:            {403, "Forbidden"},
-	CodeQuotaExceeded:        {403, "Quota Exceeded"},
-	CodeNotFound:             {404, "Not Found"},
-	CodeMethodNotAllowed:     {405, "Method Not Allowed"},
-	CodeAliasTaken:           {409, "Alias Taken"},
-	CodeEmailTaken:           {409, "Email Taken"},
-	CodeLinkGone:             {410, "Link Gone"},
-	CodePayloadTooLarge:      {413, "Payload Too Large"},
-	CodeUnsupportedMediaType: {415, "Unsupported Media Type"},
-	CodeRateLimited:          {429, "Rate Limited"},
-	CodeInternal:             {500, "Internal Server Error"},
+// Только для чтения: менять в рантайме нельзя.
+var codes = map[Code]codeInfo{ //nolint:gochecknoglobals // read-only lookup table
+	CodeMalformedJSON:        {http.StatusBadRequest, "Malformed JSON"},
+	CodeInvalidQuery:         {http.StatusBadRequest, "Invalid Query"},
+	CodeValidationFailed:     {http.StatusUnprocessableEntity, "Validation Failed"},
+	CodeUnauthorized:         {http.StatusUnauthorized, "Unauthorized"},
+	CodeForbidden:            {http.StatusForbidden, "Forbidden"},
+	CodeQuotaExceeded:        {http.StatusForbidden, "Quota Exceeded"},
+	CodeNotFound:             {http.StatusNotFound, "Not Found"},
+	CodeMethodNotAllowed:     {http.StatusMethodNotAllowed, "Method Not Allowed"},
+	CodeAliasTaken:           {http.StatusConflict, "Alias Taken"},
+	CodeEmailTaken:           {http.StatusConflict, "Email Taken"},
+	CodeLinkGone:             {http.StatusGone, "Link Gone"},
+	CodePayloadTooLarge:      {http.StatusRequestEntityTooLarge, "Payload Too Large"},
+	CodeUnsupportedMediaType: {http.StatusUnsupportedMediaType, "Unsupported Media Type"},
+	CodeRateLimited:          {http.StatusTooManyRequests, "Rate Limited"},
+	CodeInternal:             {http.StatusInternalServerError, "Internal Server Error"},
 }
 
 // TypeURI возвращает URI для поля "type": malformed_json -> https://sho.rt/errors/malformed-json.

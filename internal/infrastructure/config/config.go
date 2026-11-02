@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
 )
+
+// ErrInvalidConfig - конфиг прочитан, но значения не прошли проверку.
+var ErrInvalidConfig = errors.New("invalid config")
 
 type (
 	// Config - конфигурация приложения. Читается из переменных окружения.
@@ -41,27 +45,27 @@ func (s Server) Addr() string { return ":" + strconv.Itoa(s.Port) }
 // Load читает конфиг из переменных окружения.
 // Возвращает сразу все ошибки, а не только первую.
 func Load() (*Config, error) {
-	return load(env.Options{})
+	return loadWithOpts(env.Options{})
 }
 
-// load позволяет тестам передать переменные через opts.Environment, не трогая os.Environ.
-func load(opts env.Options) (*Config, error) {
+// loadWithOpts позволяет тестам передать переменные через opts.Environment, не трогая os.Environ.
+func loadWithOpts(opts env.Options) (*Config, error) {
 	var cfg Config
 	if err := env.ParseWithOptions(&cfg, opts); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
+		return nil, err
 	}
 
 	return &cfg, nil
 }
 
 func (c Config) validate() error {
-	var errs []error
+	var problems []string
 	check := func(ok bool, format string, args ...any) {
 		if !ok {
-			errs = append(errs, fmt.Errorf(format, args...))
+			problems = append(problems, fmt.Sprintf(format, args...))
 		}
 	}
 
@@ -84,5 +88,8 @@ func (c Config) validate() error {
 
 	check(c.Server.MaxBodyBytes > 0, "SERVER_MAX_BODY_BYTES must be positive, got %d", c.Server.MaxBodyBytes)
 
-	return errors.Join(errs...)
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", ErrInvalidConfig, strings.Join(problems, "; "))
 }
