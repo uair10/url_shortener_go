@@ -51,6 +51,13 @@ linters:
       min-complexity: 20
     cyclop:
       max-complexity: 15
+    ireturn:
+      allow:
+        - anon
+        - error
+        - empty
+        - stdlib
+        - github.com/danielgtaylor/huma/v2.API
     nestif:
       min-complexity: 5
     funlen:

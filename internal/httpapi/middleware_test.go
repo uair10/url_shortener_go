@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,10 +12,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/uair10/url_shortener_go/internal/httpapi/requestid"
 )
 
-// Тесты SHR-4: middleware request ID, access log, recovery - в сборке, как в проде (withMiddleware).
+// Тесты SHR-4: middleware request ID, access log, recovery - в сборке, как в проде (Huma + withMiddleware).
 
 // logEntry - поля строки лога, которые проверяют тесты.
 type logEntry struct {
@@ -30,18 +33,25 @@ type logEntry struct {
 
 const okBody = "hello"
 
-// newTestHandler собирает цепочку middleware вокруг тестового роутера и пишет логи в buf.
+// bytesOutput - ответ тестовой операции с сырым телом.
+type bytesOutput struct {
+	Body []byte
+}
+
+// newTestHandler собирает прод-сборку (Huma + middleware) с тестовыми операциями и пишет логи в buf.
 func newTestHandler(buf *bytes.Buffer) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthz)
-	mux.HandleFunc("GET /ok", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, okBody)
+	logger := slog.New(slog.NewJSONHandler(buf, nil))
+	return newTestAPIHandler(logger, testConfig(), func(api huma.API) {
+		huma.Get(api, "/ok", func(context.Context, *struct{}) (*bytesOutput, error) {
+			return &bytesOutput{Body: []byte(okBody)}, nil
+		})
+		huma.Get(api, "/panic", func(context.Context, *struct{}) (*struct{}, error) {
+			panic("boom secret-panic")
+		})
+		huma.Get(api, "/fail", func(context.Context, *struct{}) (*struct{}, error) {
+			return nil, errors.New("db: password=secret-db")
+		})
 	})
-	mux.HandleFunc("GET /panic", func(http.ResponseWriter, *http.Request) { panic("boom secret-panic") })
-	mux.Handle("GET /fail", Handler(func(http.ResponseWriter, *http.Request) error {
-		return errors.New("db: password=secret-db")
-	}))
-	return withMiddleware(mux, slog.New(slog.NewJSONHandler(buf, nil)), 1024)
 }
 
 // parseLog разбирает JSON-строки лога.

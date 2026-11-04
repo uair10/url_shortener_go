@@ -1,29 +1,23 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
-
-	"github.com/uair10/url_shortener_go/internal/infrastructure/config"
 )
 
 // newTestServer собирает сервер на заданном порту с логгером, который ничего не пишет.
 func newTestServer(t *testing.T, port int) *Server {
 	t.Helper()
-	return New(slog.New(slog.DiscardHandler), config.Server{
-		Port:              port,
-		ShutdownTimeout:   time.Second,
-		ReadHeaderTimeout: time.Second,
-		ReadTimeout:       time.Second,
-		WriteTimeout:      time.Second,
-		IdleTimeout:       time.Second,
-		MaxBodyBytes:      1024,
-	})
+	cfg := testConfig()
+	cfg.Port = port
+	return New(slog.New(slog.DiscardHandler), cfg)
 }
 
 func TestServerRoutes(t *testing.T) {
@@ -78,7 +72,7 @@ func TestServerRoutes(t *testing.T) {
 		},
 	}
 
-	handler := newHandler(slog.New(slog.DiscardHandler), 1024)
+	handler := newHandler(slog.New(slog.DiscardHandler), testConfig())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -92,7 +86,9 @@ func TestServerRoutes(t *testing.T) {
 			if rec.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
 			}
-			if tt.wantBody != "" && rec.Body.String() != tt.wantBody {
+			// Сравниваем JSON, а не байты: энкодер Huma добавляет перевод строки.
+			// Лишних полей (например, $schema от Huma) быть не должно: BR-2.6.
+			if tt.wantBody != "" && !jsonEqual(t, rec.Body.Bytes(), tt.wantBody) {
 				t.Errorf("body = %q, want %q", rec.Body.String(), tt.wantBody)
 			}
 			if got := rec.Header().Get("Content-Type"); tt.wantContentType != "" && got != tt.wantContentType {
@@ -158,6 +154,19 @@ func TestServerShutdown(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Serve() did not return after Shutdown")
 	}
+}
+
+// jsonEqual сравнивает JSON по значению.
+func jsonEqual(t *testing.T, got []byte, want string) bool {
+	t.Helper()
+	var g, w any
+	if err := json.Unmarshal(got, &g); err != nil {
+		t.Fatalf("body is not JSON: %v\n%s", err, got)
+	}
+	if err := json.Unmarshal([]byte(want), &w); err != nil {
+		t.Fatalf("want is not JSON: %v", err)
+	}
+	return reflect.DeepEqual(g, w)
 }
 
 // get делает GET-запрос и возвращает код ответа.

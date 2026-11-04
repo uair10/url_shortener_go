@@ -41,9 +41,6 @@ func Validation(errs []FieldError) *Problem {
 // MalformedJSON - 400: тело не парсится, лишние поля, неверный тип поля.
 func MalformedJSON(detail string) *Problem { return New(CodeMalformedJSON, detail) }
 
-// InvalidQuery - 400: неверные query-параметры.
-func InvalidQuery(detail string) *Problem { return New(CodeInvalidQuery, detail) }
-
 // Unauthorized - 401: нет ключа или ключ неверный.
 func Unauthorized(detail string) *Problem { return New(CodeUnauthorized, detail) }
 

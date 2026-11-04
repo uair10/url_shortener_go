@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := check
 
-.PHONY: run fmt lint lint-fix test cover vuln tidy check hooks pre-commit
+.PHONY: run fmt lint lint-fix test cover vuln tidy openapi openapi-lint check hooks pre-commit help
 
 run: ## Запустить код (переменные из .env, если он есть)
 	set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/shortener
@@ -27,6 +27,12 @@ vuln: ## Проверка уязвимостей
 tidy: ## Привести go.mod/go.sum в порядок
 	go mod tidy
 	go mod verify
+
+openapi: ## Генерация openapi.yaml
+	go run ./cmd/openapi -o api/openapi.yaml
+
+openapi-lint: ## Линтер спецификации OpenAPI (нужен Node.js)
+	npx -y @redocly/cli@2.65.0 lint api/openapi.yaml
 
 check: tidy fmt lint test vuln ## Всё сразу перед коммитом
 

@@ -3,6 +3,7 @@ package middleware
 import (
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/uair10/url_shortener_go/internal/infrastructure/logging"
@@ -34,8 +35,8 @@ func logRequest(r *http.Request, rec *responseRecorder, start time.Time) {
 		logger.InfoContext(r.Context(), "request", append(attrs, slog.Bool("aborted", true))...)
 		panic(v)
 	}
-	// Пробы Kubernetes дергают /healthz каждые несколько секунд - это шум.
-	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
+	// Убираем из логов шум.
+	if r.Method == http.MethodGet && slices.Contains([]string{"/healthz", "/docs", "/", "/favicon.ico", "/openapi.yaml", "/openapi.json"}, r.URL.Path) {
 		return
 	}
 	logger.InfoContext(r.Context(), "request", attrs...)

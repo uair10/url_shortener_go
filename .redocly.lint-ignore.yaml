@@ -1,0 +1,5 @@
+# Осознанные исключения линтера спецификации (BR-5.5).
+api/openapi.yaml:
+  # /healthz не принимает параметров и тела: 4xx ему отдавать нечем.
+  operation-4xx-response:
+    - '#/paths/~1healthz/get/responses'

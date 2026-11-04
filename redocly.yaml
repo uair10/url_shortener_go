@@ -1,0 +1,7 @@
+# Линтер api/openapi.yaml (BR-5.5): pre-commit и make openapi-lint.
+extends:
+  - recommended
+
+rules:
+  # Лицензия у проекта не выбрана.
+  info-license: off

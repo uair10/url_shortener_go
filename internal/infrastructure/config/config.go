@@ -25,12 +25,14 @@ type (
 	// Server - настройки HTTP-сервера.
 	Server struct {
 		Port              int           `env:"PORT" envDefault:"8080"`
+		PublicBaseURL     string        `env:"PUBLIC_BASE_URL"`
 		ShutdownTimeout   time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
 		ReadHeaderTimeout time.Duration `env:"READ_HEADER_TIMEOUT" envDefault:"5s"`
 		ReadTimeout       time.Duration `env:"READ_TIMEOUT" envDefault:"10s"`
 		WriteTimeout      time.Duration `env:"WRITE_TIMEOUT" envDefault:"10s"`
 		IdleTimeout       time.Duration `env:"IDLE_TIMEOUT" envDefault:"60s"`
 		MaxBodyBytes      int64         `env:"MAX_BODY_BYTES" envDefault:"1048576"` // 1 MiB
+		DocsEnabled       bool          `env:"DOCS_ENABLED" envDefault:"false"`
 	}
 
 	// Log - настройки логирования.

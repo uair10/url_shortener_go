@@ -16,7 +16,6 @@ func TestNewAllCodes(t *testing.T) {
 		status int
 	}{
 		{CodeMalformedJSON, http.StatusBadRequest},
-		{CodeInvalidQuery, http.StatusBadRequest},
 		{CodeValidationFailed, http.StatusUnprocessableEntity},
 		{CodeUnauthorized, http.StatusUnauthorized},
 		{CodeForbidden, http.StatusForbidden},

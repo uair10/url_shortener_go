@@ -21,6 +21,7 @@ func TestLoad(t *testing.T) {
 			WriteTimeout:      10 * time.Second,
 			IdleTimeout:       60 * time.Second,
 			MaxBodyBytes:      1 << 20,
+			DocsEnabled:       false,
 		},
 		Log: Log{Level: slog.LevelInfo},
 	}
