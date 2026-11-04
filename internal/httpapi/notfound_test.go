@@ -5,13 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/uair10/url_shortener_go/internal/httpapi/problem"
-	"github.com/uair10/url_shortener_go/internal/httpapi/requestid"
 )
 
 func TestRouteErrorsAsProblem(t *testing.T) {
@@ -39,27 +38,8 @@ func TestRouteErrorsAsProblem(t *testing.T) {
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 
-			if rec.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
-			}
-			if got := rec.Header().Get("Allow"); got != tt.wantAllow {
-				t.Errorf("Allow = %q, want %q", got, tt.wantAllow)
-			}
-
-			body := decodeProblem(t, rec)
-			if body["code"] != tt.wantCode {
-				t.Errorf("code = %v, want %q", body["code"], tt.wantCode)
-			}
-			if body["status"] != float64(tt.wantStatus) {
-				t.Errorf("status field = %v, want %d", body["status"], tt.wantStatus)
-			}
-			wantType := "https://sho.rt/errors/" + strings.ReplaceAll(tt.wantCode, "_", "-")
-			if body["type"] != wantType {
-				t.Errorf("type = %v, want %q", body["type"], wantType)
-			}
-			if id := rec.Header().Get(requestid.Header); id == "" || body["request_id"] != id {
-				t.Errorf("request_id = %v, header %s = %q", body["request_id"], requestid.Header, id)
-			}
+			assert.Equal(t, tt.wantAllow, rec.Header().Get("Allow"), "header Allow")
+			checkProblem(t, rec, tt.wantStatus, tt.wantCode)
 		})
 	}
 }
@@ -83,7 +63,5 @@ func TestHandlerNotFoundNotRewritten(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	body := checkProblem(t, rec, http.StatusNotFound, "not_found")
-	if body["detail"] != "link abc not found" {
-		t.Errorf("detail = %v, want %q", body["detail"], "link abc not found")
-	}
+	assert.Equal(t, "link abc not found", body["detail"], "field detail")
 }

@@ -1,8 +1,11 @@
 package requestid
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // BR-4.1: принимается ID до 64 символов [A-Za-z0-9-].
@@ -28,19 +31,16 @@ func TestValid(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := Valid(tt.id); got != tt.want {
-			t.Errorf("Valid(%q) = %v, want %v", tt.id, got, tt.want)
-		}
+		t.Run(fmt.Sprintf("%.20q", tt.id), func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, Valid(tt.id), "Valid(%q)", tt.id)
+		})
 	}
 }
 
 func TestContext(t *testing.T) {
 	t.Parallel()
 
-	if got := From(t.Context()); got != "" {
-		t.Errorf("From(empty ctx) = %q, want empty", got)
-	}
-	if got := From(With(t.Context(), "abc")); got != "abc" {
-		t.Errorf("From(With(abc)) = %q, want abc", got)
-	}
+	assert.Empty(t, From(t.Context()), "From(empty ctx)")
+	assert.Equal(t, "abc", From(With(t.Context(), "abc")), "From(With(abc))")
 }

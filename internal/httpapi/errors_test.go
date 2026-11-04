@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/uair10/url_shortener_go/internal/httpapi/problem"
 	"github.com/uair10/url_shortener_go/internal/httpapi/requestid"
@@ -112,11 +114,8 @@ func TestRequestErrors(t *testing.T) {
 
 			rec := serve(t, handler, http.MethodPost, tt.target, tt.contentType, tt.body)
 			body := checkProblem(t, rec, tt.wantStatus, tt.wantCode)
-			if tt.wantFields == nil {
-				return
-			}
-			if got := fieldErrors(t, body); !slices.Equal(got, tt.wantFields) {
-				t.Errorf("error fields = %v, want %v", got, tt.wantFields)
+			if tt.wantFields != nil {
+				assert.Equal(t, tt.wantFields, fieldErrors(t, body), "fields in errors[]")
 			}
 		})
 	}
@@ -128,12 +127,8 @@ func TestRequestValid(t *testing.T) {
 
 	rec := serve(t, newErrorsTestHandler(&bytes.Buffer{}), http.MethodPost, "/test/echo?limit=5",
 		"application/json", `{"url":"https://go.dev"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200\n%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"url":"https://go.dev"`) {
-		t.Errorf("body = %s, want url echoed", rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	assert.JSONEq(t, `{"url":"https://go.dev"}`, rec.Body.String())
 }
 
 // BR-3.7: значения из запроса не возвращаются в ответе об ошибке
@@ -169,12 +164,8 @@ func TestErrorBodyHasNoRequestValues(t *testing.T) {
 			}
 			rec := doRequest(handler, req)
 
-			if rec.Code < http.StatusBadRequest {
-				t.Fatalf("status = %d, want error", rec.Code)
-			}
-			if strings.Contains(rec.Body.String(), secretValue) {
-				t.Errorf("error body echoes request value: %s", rec.Body.String())
-			}
+			require.GreaterOrEqual(t, rec.Code, http.StatusBadRequest, "want error status")
+			assert.NotContains(t, rec.Body.String(), secretValue, "error body echoes request value")
 		})
 	}
 }
@@ -205,12 +196,10 @@ func TestOperationErrors(t *testing.T) {
 
 			rec := serve(t, handler, http.MethodGet, tt.target, "", "")
 			body := checkProblem(t, rec, tt.wantStatus, tt.wantCode)
-			if tt.wantDetail != "" && body["detail"] != tt.wantDetail {
-				t.Errorf("detail = %v, want %q", body["detail"], tt.wantDetail)
+			if tt.wantDetail != "" {
+				assert.Equal(t, tt.wantDetail, body["detail"], "field detail")
 			}
-			if strings.Contains(rec.Body.String(), secretValue) {
-				t.Errorf("body leaks error text (NFR-7): %s", rec.Body.String())
-			}
+			assert.NotContains(t, rec.Body.String(), secretValue, "body leaks error text (NFR-7)")
 		})
 	}
 
@@ -218,9 +207,7 @@ func TestOperationErrors(t *testing.T) {
 		t.Parallel()
 
 		rec := serve(t, handler, http.MethodGet, "/test/validation", "", "")
-		if got := fieldErrors(t, decodeProblem(t, rec)); !slices.Equal(got, []string{"url"}) {
-			t.Errorf("error fields = %v, want [url]", got)
-		}
+		assert.Equal(t, []string{"url"}, fieldErrors(t, decodeProblem(t, rec)), "fields in errors[]")
 	})
 }
 
@@ -233,16 +220,8 @@ func TestUnknownErrorLogged(t *testing.T) {
 	req.Header.Set(requestid.Header, "req-500")
 	rec := doRequest(newErrorsTestHandler(&buf), req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rec.Code)
-	}
-	var logged bool
-	for line := range bytes.Lines(buf.Bytes()) {
-		if bytes.Contains(line, []byte(secretValue)) && bytes.Contains(line, []byte(`"request_id":"req-500"`)) {
-			logged = true
-		}
-	}
-	if !logged {
-		t.Errorf("no log line with error text and request_id:\n%s", buf.String())
-	}
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.True(t, slices.ContainsFunc(slices.Collect(bytes.Lines(buf.Bytes())), func(line []byte) bool {
+		return bytes.Contains(line, []byte(secretValue)) && bytes.Contains(line, []byte(`"request_id":"req-500"`))
+	}), "no log line with error text and request_id, log:\n%s", buf.String())
 }

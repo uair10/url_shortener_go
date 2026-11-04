@@ -1,15 +1,16 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // newTestServer собирает сервер на заданном порту с логгером, который ничего не пишет.
@@ -83,19 +84,17 @@ func TestServerRoutes(t *testing.T) {
 
 			handler.ServeHTTP(rec, req)
 
-			if rec.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
-			}
+			assert.Equal(t, tt.wantStatus, rec.Code, "HTTP status")
 			// Сравниваем JSON, а не байты: энкодер Huma добавляет перевод строки.
 			// Лишних полей (например, $schema от Huma) быть не должно: BR-2.6.
-			if tt.wantBody != "" && !jsonEqual(t, rec.Body.Bytes(), tt.wantBody) {
-				t.Errorf("body = %q, want %q", rec.Body.String(), tt.wantBody)
+			if tt.wantBody != "" {
+				assert.JSONEq(t, tt.wantBody, rec.Body.String(), "body")
 			}
-			if got := rec.Header().Get("Content-Type"); tt.wantContentType != "" && got != tt.wantContentType {
-				t.Errorf("Content-Type = %q, want %q", got, tt.wantContentType)
+			if tt.wantContentType != "" {
+				assert.Equal(t, tt.wantContentType, rec.Header().Get("Content-Type"), "header Content-Type")
 			}
-			if got := rec.Header().Get("Allow"); tt.wantAllow != "" && got != tt.wantAllow {
-				t.Errorf("Allow = %q, want %q", got, tt.wantAllow)
+			if tt.wantAllow != "" {
+				assert.Equal(t, tt.wantAllow, rec.Header().Get("Allow"), "header Allow")
 			}
 		})
 	}
@@ -107,20 +106,12 @@ func TestServerListenPortBusy(t *testing.T) {
 	// Занимаем порт сами, чтобы сервер не смог его взять.
 	lc := net.ListenConfig{}
 	busy, err := lc.Listen(t.Context(), "tcp", ":0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	require.NoError(t, err, "listen")
 	t.Cleanup(func() { _ = busy.Close() })
 	addr, ok := busy.Addr().(*net.TCPAddr)
-	if !ok {
-		t.Fatalf("Addr() = %T, want *net.TCPAddr", busy.Addr())
-	}
-	port := addr.Port
+	require.True(t, ok, "Addr() = %T, want *net.TCPAddr", busy.Addr())
 
-	err = newTestServer(t, port).Listen(t.Context())
-	if err == nil {
-		t.Fatal("Listen() = nil, want error: port is busy")
-	}
+	assert.Error(t, newTestServer(t, addr.Port).Listen(t.Context()), "Listen() on busy port")
 }
 
 func TestServerShutdown(t *testing.T) {
@@ -129,57 +120,31 @@ func TestServerShutdown(t *testing.T) {
 	// Свой listener на :0: порт занят ещё до старта сервера, гонки за порт нет.
 	lc := net.ListenConfig{}
 	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	require.NoError(t, err, "listen")
 	server := newTestServer(t, 0)
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.Serve(ln) }()
 
 	// Запрос пройдёт, даже если Serve ещё не начал принимать: соединение ждёт в очереди ОС.
-	if status := get(t, "http://"+ln.Addr().String()+"/healthz"); status != http.StatusOK {
-		t.Fatalf("GET /healthz status = %d, want %d", status, http.StatusOK)
-	}
-
-	if err := server.Shutdown(t.Context()); err != nil {
-		t.Fatalf("Shutdown() = %v, want nil", err)
-	}
+	require.Equal(t, http.StatusOK, get(t, "http://"+ln.Addr().String()+"/healthz"), "GET /healthz")
+	require.NoError(t, server.Shutdown(t.Context()), "Shutdown()")
 
 	select {
 	case err := <-errCh:
-		if err != nil {
-			t.Errorf("Serve() after Shutdown = %v, want nil", err)
-		}
+		require.NoError(t, err, "Serve() after Shutdown")
 	case <-time.After(2 * time.Second):
-		t.Fatal("Serve() did not return after Shutdown")
+		require.Fail(t, "Serve() did not return after Shutdown")
 	}
-}
-
-// jsonEqual сравнивает JSON по значению.
-func jsonEqual(t *testing.T, got []byte, want string) bool {
-	t.Helper()
-	var g, w any
-	if err := json.Unmarshal(got, &g); err != nil {
-		t.Fatalf("body is not JSON: %v\n%s", err, got)
-	}
-	if err := json.Unmarshal([]byte(want), &w); err != nil {
-		t.Fatalf("want is not JSON: %v", err)
-	}
-	return reflect.DeepEqual(g, w)
 }
 
 // get делает GET-запрос и возвращает код ответа.
 func get(t *testing.T, url string) int {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
+	require.NoError(t, err, "new request")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
-	}
+	require.NoError(t, err, "GET %s", url)
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
 	return resp.StatusCode

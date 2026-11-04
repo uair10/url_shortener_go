@@ -1,17 +1,18 @@
 package httpapi
 
 import (
-	"bytes"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Тесты SHR-5: документация и спецификация, построенная из кода.
@@ -28,9 +29,7 @@ func buildSpec(t *testing.T) *huma.OpenAPI {
 func specYAML(t *testing.T) []byte {
 	t.Helper()
 	b, err := OpenAPIYAML()
-	if err != nil {
-		t.Fatalf("spec to YAML: %v", err)
-	}
+	require.NoError(t, err, "spec to YAML")
 	return b
 }
 
@@ -38,51 +37,39 @@ func specYAML(t *testing.T) []byte {
 func TestDocsRoutes(t *testing.T) {
 	t.Parallel()
 
-	tests := []docsCase{
-		{"/openapi.yaml", "yaml", "openapi: 3.1"},
-		{"/docs", "text/html", "/openapi"},
+	tests := []struct {
+		name   string
+		path   string
+		wantCT string
+		want   string // подстрока тела
+	}{
+		{"spec", "/openapi.yaml", "yaml", "openapi: 3.1"},
+		{"ui", "/docs", "text/html", "/openapi"},
 	}
 
 	for _, enabled := range []bool{true, false} {
-		cfg := testConfig()
-		cfg.DocsEnabled = enabled
-		handler := newHandler(slog.New(slog.DiscardHandler), cfg)
-		state := "выключено"
-		if enabled {
-			state = "включено"
-		}
+		t.Run(fmt.Sprintf("docs_enabled=%t", enabled), func(t *testing.T) {
+			t.Parallel()
 
-		for _, tt := range tests {
-			t.Run(tt.path+" "+state, func(t *testing.T) {
-				t.Parallel()
+			cfg := testConfig()
+			cfg.DocsEnabled = enabled
+			handler := newHandler(slog.New(slog.DiscardHandler), cfg)
 
-				rec := serve(t, handler, http.MethodGet, tt.path, "", "")
-				if !enabled {
-					checkProblem(t, rec, http.StatusNotFound, "not_found")
-					return
-				}
-				checkDocsResponse(t, rec, tt)
-			})
-		}
-	}
-}
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
 
-type docsCase struct {
-	path   string
-	wantCT string
-	want   string // подстрока тела
-}
-
-func checkDocsResponse(t *testing.T, rec *httptest.ResponseRecorder, tt docsCase) {
-	t.Helper()
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, tt.wantCT) {
-		t.Errorf("Content-Type = %q, want %q", ct, tt.wantCT)
-	}
-	if !strings.Contains(rec.Body.String(), tt.want) {
-		t.Errorf("body has no %q", tt.want)
+					rec := serve(t, handler, http.MethodGet, tt.path, "", "")
+					if !enabled {
+						checkProblem(t, rec, http.StatusNotFound, "not_found")
+						return
+					}
+					require.Equal(t, http.StatusOK, rec.Code, "GET %s", tt.path)
+					assert.Contains(t, rec.Header().Get("Content-Type"), tt.wantCT, "Content-Type")
+					assert.Contains(t, rec.Body.String(), tt.want, "body")
+				})
+			}
+		})
 	}
 }
 
@@ -91,42 +78,17 @@ func TestOpenAPIGolden(t *testing.T) {
 	t.Parallel()
 
 	want, err := os.ReadFile(specFile)
-	if err != nil {
-		t.Fatalf("read %s: %v (сгенерируй: make openapi)", specFile, err)
-	}
-	got := specYAML(t)
-	if bytes.Equal(got, want) {
-		return
-	}
-	t.Errorf("%s не совпадает с кодом, выполни make openapi и закоммить файл\n%s",
-		specFile, firstDiff(string(want), string(got)))
+	require.NoError(t, err, "сгенерируй спецификацию: make openapi")
+	assert.Equal(t, string(want), string(specYAML(t)),
+		"%s не совпадает с кодом, выполни make openapi и закоммить файл", specFile)
 }
 
 // BR-5.6: сборка детерминирована, иначе golden-тест будет мигать.
 func TestOpenAPIDeterministic(t *testing.T) {
 	t.Parallel()
 
-	if a, b := specYAML(t), specYAML(t); !bytes.Equal(a, b) {
-		t.Errorf("two builds differ:\n%s", firstDiff(string(a), string(b)))
-	}
-}
-
-// firstDiff показывает первую отличающуюся строку.
-func firstDiff(want, got string) string {
-	wantLines, gotLines := strings.Split(want, "\n"), strings.Split(got, "\n")
-	for i := range max(len(wantLines), len(gotLines)) {
-		var w, g string
-		if i < len(wantLines) {
-			w = wantLines[i]
-		}
-		if i < len(gotLines) {
-			g = gotLines[i]
-		}
-		if w != g {
-			return fmt.Sprintf("line %d:\n  file: %s\n  code: %s", i+1, w, g)
-		}
-	}
-	return ""
+	first, second := specYAML(t), specYAML(t)
+	assert.Equal(t, string(first), string(second), "two builds differ")
 }
 
 // BR-5.1, BR-5.2: версия, общая информация, схема авторизации X-API-Key.
@@ -134,27 +96,20 @@ func TestOpenAPIDocument(t *testing.T) {
 	t.Parallel()
 
 	spec := buildSpec(t)
-	if !strings.HasPrefix(spec.OpenAPI, "3.1") {
-		t.Errorf("openapi = %q, want 3.1.x", spec.OpenAPI)
-	}
-	if spec.Info == nil || spec.Info.Title == "" || spec.Info.Version == "" {
-		t.Errorf("info = %+v, want title and version", spec.Info)
-	}
-
-	var apiKey bool
-	if spec.Components != nil {
-		for _, s := range spec.Components.SecuritySchemes {
-			if s.Type == "apiKey" && s.In == "header" && s.Name == "X-API-Key" {
-				apiKey = true
-			}
-		}
-	}
-	if !apiKey {
-		t.Error("no apiKey security scheme in header X-API-Key")
+	assert.True(t, strings.HasPrefix(spec.OpenAPI, "3.1"), "openapi = %q, want 3.1.x", spec.OpenAPI)
+	if assert.NotNil(t, spec.Info, "info") {
+		assert.NotEmpty(t, spec.Info.Title, "info.title")
+		assert.NotEmpty(t, spec.Info.Version, "info.version")
 	}
 
-	if item := spec.Paths["/healthz"]; item == nil || item.Get == nil {
-		t.Error("GET /healthz is not described")
+	require.NotNil(t, spec.Components, "components")
+	assert.True(t, slices.ContainsFunc(slices.Collect(maps.Values(spec.Components.SecuritySchemes)),
+		func(s *huma.SecurityScheme) bool {
+			return s.Type == "apiKey" && s.In == "header" && s.Name == "X-API-Key"
+		}), "no apiKey security scheme in header X-API-Key")
+
+	if item := spec.Paths["/healthz"]; assert.NotNil(t, item, "path /healthz") {
+		assert.NotNil(t, item.Get, "GET /healthz")
 	}
 }
 
@@ -164,16 +119,21 @@ func TestOpenAPIOperations(t *testing.T) {
 	t.Parallel()
 
 	spec := buildSpec(t)
-	if len(spec.Paths) == 0 {
-		t.Fatal("no paths in spec")
-	}
-	for path, item := range spec.Paths {
-		for method, op := range operations(item) {
-			name := method + " " + path
-			if op.OperationID == "" || op.Summary == "" || len(op.Tags) == 0 {
-				t.Errorf("%s: operationId=%q summary=%q tags=%v, want all set", name, op.OperationID, op.Summary, op.Tags)
+	require.NotEmpty(t, spec.Paths, "paths")
+	for _, path := range slices.Sorted(maps.Keys(spec.Paths)) {
+		for method, op := range operations(spec.Paths[path]) {
+			name := op.OperationID
+			if name == "" {
+				name = method + " " + path
 			}
-			checkErrorResponses(t, spec, name, op)
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.NotEmpty(t, op.OperationID, "operationId")
+				assert.NotEmpty(t, op.Summary, "summary")
+				assert.NotEmpty(t, op.Tags, "tags")
+				checkErrorResponses(t, spec, op)
+			})
 		}
 	}
 }
@@ -195,7 +155,7 @@ func operations(item *huma.PathItem) map[string]*huma.Operation {
 
 // checkErrorResponses: у операции есть хотя бы один ответ-ошибка, и каждый -
 // application/problem+json со схемой из раздела 6.
-func checkErrorResponses(t *testing.T, spec *huma.OpenAPI, name string, op *huma.Operation) {
+func checkErrorResponses(t *testing.T, spec *huma.OpenAPI, op *huma.Operation) {
 	t.Helper()
 	var errorsFound int
 	for status, resp := range op.Responses {
@@ -204,39 +164,28 @@ func checkErrorResponses(t *testing.T, spec *huma.OpenAPI, name string, op *huma
 		}
 		errorsFound++
 		media := resp.Content["application/problem+json"]
-		if media == nil || media.Schema == nil {
-			t.Errorf("%s %s: no application/problem+json schema", name, status)
-			continue
+		if assert.NotNil(t, media, "response %s: application/problem+json", status) &&
+			assert.NotNil(t, media.Schema, "response %s: schema", status) {
+			checkProblemSchema(t, spec, status, media.Schema)
 		}
-		checkProblemSchema(t, spec, name+" "+status, media.Schema)
 	}
-	if errorsFound == 0 {
-		t.Errorf("%s: no error responses described", name)
-	}
+	assert.Positive(t, errorsFound, "no error responses described")
 }
 
 // checkProblemSchema: схема ошибки содержит поля раздела 6, а errors[] - field и reason.
-func checkProblemSchema(t *testing.T, spec *huma.OpenAPI, name string, schema *huma.Schema) {
+func checkProblemSchema(t *testing.T, spec *huma.OpenAPI, status string, schema *huma.Schema) {
 	t.Helper()
 	s := resolve(spec, schema)
 	for _, prop := range []string{"type", "title", "status", "detail", "code", "request_id", "errors"} {
-		if s.Properties[prop] == nil {
-			t.Errorf("%s: error schema has no %q", name, prop)
-		}
+		assert.Contains(t, s.Properties, prop, "response %s: error schema property", status)
 	}
 	errs := s.Properties["errors"]
-	if errs == nil || errs.Items == nil {
+	if errs == nil || !assert.NotNil(t, errs.Items, "response %s: errors[] items", status) {
 		return
 	}
 	item := resolve(spec, errs.Items)
-	props := make([]string, 0, len(item.Properties))
-	for p := range item.Properties {
-		props = append(props, p)
-	}
-	slices.Sort(props)
-	if !slices.Equal(props, []string{"field", "reason"}) {
-		t.Errorf("%s: errors[] properties = %v, want [field reason]", name, props)
-	}
+	assert.ElementsMatch(t, []string{"field", "reason"}, slices.Collect(maps.Keys(item.Properties)),
+		"response %s: errors[] properties", status)
 }
 
 // resolve раскрывает $ref на схему из components.

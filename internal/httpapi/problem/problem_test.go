@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Каждый код собирается в проблему со своим статусом и code.
@@ -31,33 +34,29 @@ func TestNewAllCodes(t *testing.T) {
 		{CodeInternal, http.StatusInternalServerError},
 	}
 	for _, tt := range tests {
-		p := New(tt.code, "")
-		if p.Code != string(tt.code) || p.Status != tt.status || p.Title == "" || p.Type != tt.code.TypeURI() {
-			t.Errorf("New(%q) = %+v, want status %d", tt.code, p, tt.status)
-		}
+		t.Run(string(tt.code), func(t *testing.T) {
+			t.Parallel()
+
+			p := New(tt.code, "")
+			assert.Equal(t, string(tt.code), p.Code, "Code")
+			assert.Equal(t, tt.status, p.Status, "Status")
+			assert.NotEmpty(t, p.Title, "Title")
+			assert.Equal(t, tt.code.TypeURI(), p.Type, "Type")
+		})
 	}
 }
 
 func TestNewUnknownCodePanics(t *testing.T) {
 	t.Parallel()
 
-	defer func() {
-		if recover() == nil {
-			t.Error("New with unknown code did not panic")
-		}
-	}()
-	_ = New("no_such_code", "")
+	assert.Panics(t, func() { _ = New("no_such_code", "") })
 }
 
 func TestError(t *testing.T) {
 	t.Parallel()
 
-	if got := AliasTaken("").Error(); got != "alias_taken" {
-		t.Errorf("Error() = %q, want %q", got, "alias_taken")
-	}
-	if got := NotFound("link abc").Error(); got != "not_found: link abc" {
-		t.Errorf("Error() = %q, want %q", got, "not_found: link abc")
-	}
+	require.EqualError(t, AliasTaken(""), "alias_taken")
+	require.EqualError(t, NotFound("link abc"), "not_found: link abc")
 }
 
 // detail 5xx не уходит клиенту, даже если проблему собрали в обход Internal().
@@ -69,13 +68,7 @@ func TestWriteHidesDetailFor5xx(t *testing.T) {
 	p.Write(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody))
 
 	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("body is not JSON: %v", err)
-	}
-	if _, ok := body["detail"]; ok {
-		t.Errorf("5xx body has detail: %s", rec.Body.String())
-	}
-	if p.Detail == "" {
-		t.Error("Write changed p")
-	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body), "body is not JSON: %s", rec.Body.String())
+	assert.NotContains(t, body, "detail", "5xx body has detail")
+	assert.NotEmpty(t, p.Detail, "Write changed p")
 }

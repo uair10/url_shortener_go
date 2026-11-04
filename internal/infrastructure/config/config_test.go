@@ -2,11 +2,12 @@ package config
 
 import (
 	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoad(t *testing.T) {
@@ -95,29 +96,16 @@ func TestLoad(t *testing.T) {
 			got, err := loadWithOpts(env.Options{Environment: tt.env})
 
 			if len(tt.wantErrs) > 0 {
-				assertErrContains(t, err, tt.wantErrs)
+				// Все подстроки должны быть в одной ошибке: проверяем все, а не до первой.
+				require.Error(t, err)
+				for _, want := range tt.wantErrs {
+					assert.Contains(t, err.Error(), want, "error text")
+				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("load() error = %v", err)
-			}
-			if *got != tt.want {
-				t.Errorf("load() = %+v, want %+v", *got, tt.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, *got)
 		})
-	}
-}
-
-// assertErrContains проверяет, что одна ошибка содержит все подстроки.
-func assertErrContains(t *testing.T, err error, wants []string) {
-	t.Helper()
-	if err == nil {
-		t.Fatalf("error = nil, want errors %q", wants)
-	}
-	for _, want := range wants {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not contain %q", err, want)
-		}
 	}
 }

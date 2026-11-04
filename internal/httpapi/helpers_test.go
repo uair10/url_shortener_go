@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/uair10/url_shortener_go/internal/httpapi/requestid"
 	"github.com/uair10/url_shortener_go/internal/infrastructure/config"
@@ -71,48 +73,32 @@ func serve(t *testing.T, handler http.Handler, method, target, contentType, body
 // decodeProblem проверяет Content-Type и разбирает тело как problem+json.
 func decodeProblem(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	t.Helper()
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
-		t.Fatalf("Content-Type = %q, want application/problem+json\n%s", ct, rec.Body.String())
-	}
+	require.Contains(t, rec.Header().Get("Content-Type"), "application/problem+json",
+		"Content-Type of error response, body: %s", rec.Body.String())
 	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("body is not JSON: %v\n%s", err, rec.Body.String())
-	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body), "body is not JSON: %s", rec.Body.String())
 	return body
 }
+
+// problemKeys - все поля ошибки из SPEC, раздел 6. Других (например, $schema от Huma) быть не должно.
+var problemKeys = []string{"type", "title", "status", "detail", "code", "instance", "request_id", "errors"} //nolint:gochecknoglobals // неизменяемый список для тестов
 
 // checkProblem проверяет ответ-ошибку на формат из SPEC, раздел 6 (BR-3.1, BR-4.2, BR-5.7)
 // и возвращает разобранное тело.
 func checkProblem(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode string) map[string]any {
 	t.Helper()
-	if rec.Code != wantStatus {
-		t.Errorf("status = %d, want %d\n%s", rec.Code, wantStatus, rec.Body.String())
-	}
+	assert.Equal(t, wantStatus, rec.Code, "HTTP status, body: %s", rec.Body.String())
 	body := decodeProblem(t, rec)
 
-	// Все поля ошибки из раздела 6. Других (например, $schema от Huma) быть не должно.
-	problemKeys := []string{"type", "title", "status", "detail", "code", "instance", "request_id", "errors"}
-	for key := range body {
-		if !slices.Contains(problemKeys, key) {
-			t.Errorf("unexpected field %q in error body: %s", key, rec.Body.String())
-		}
-	}
-	if body["code"] != wantCode {
-		t.Errorf("code = %v, want %q", body["code"], wantCode)
-	}
-	if body["status"] != float64(wantStatus) {
-		t.Errorf("status field = %v, want %d", body["status"], wantStatus)
-	}
-	wantType := "https://sho.rt/errors/" + strings.ReplaceAll(wantCode, "_", "-")
-	if body["type"] != wantType {
-		t.Errorf("type = %v, want %q", body["type"], wantType)
-	}
-	if title, _ := body["title"].(string); title == "" {
-		t.Error("title is empty")
-	}
-	if id := rec.Header().Get(requestid.Header); id == "" || body["request_id"] != id {
-		t.Errorf("request_id = %v, header %s = %q", body["request_id"], requestid.Header, id)
-	}
+	assert.Subset(t, problemKeys, slices.Collect(maps.Keys(body)), "fields of error body outside section 6")
+	assert.Equal(t, wantCode, body["code"], "field code")
+	assert.EqualValues(t, wantStatus, body["status"], "field status")
+	assert.Equal(t, "https://sho.rt/errors/"+strings.ReplaceAll(wantCode, "_", "-"), body["type"], "field type")
+	assert.NotEmpty(t, body["title"], "field title")
+
+	id := rec.Header().Get(requestid.Header)
+	assert.NotEmpty(t, id, "header %s", requestid.Header)
+	assert.Equal(t, id, body["request_id"], "field request_id must match header %s", requestid.Header)
 	return body
 }
 
@@ -121,23 +107,16 @@ func checkProblem(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, 
 func fieldErrors(t *testing.T, body map[string]any) []string {
 	t.Helper()
 	raw, ok := body["errors"].([]any)
-	if !ok {
-		t.Fatalf("errors = %v, want array", body["errors"])
-	}
+	require.True(t, ok, "errors = %#v, want array", body["errors"])
+
 	fields := make([]string, 0, len(raw))
-	for _, item := range raw {
+	for i, item := range raw {
 		e, ok := item.(map[string]any)
-		if !ok {
-			t.Fatalf("errors item = %v, want object", item)
-		}
-		if keys := slices.Sorted(maps.Keys(e)); !slices.Equal(keys, []string{"field", "reason"}) {
-			t.Errorf("errors item keys = %v, want [field reason]", keys)
-		}
+		require.True(t, ok, "errors[%d] = %#v, want object", i, item)
+		assert.ElementsMatch(t, []string{"field", "reason"}, slices.Collect(maps.Keys(e)), "errors[%d] keys", i)
+		assert.NotEmpty(t, e["field"], "errors[%d].field", i)
+		assert.NotEmpty(t, e["reason"], "errors[%d].reason", i)
 		field, _ := e["field"].(string)
-		reason, _ := e["reason"].(string)
-		if field == "" || reason == "" {
-			t.Errorf("errors item has empty field or reason: %v", e)
-		}
 		fields = append(fields, field)
 	}
 	slices.Sort(fields)

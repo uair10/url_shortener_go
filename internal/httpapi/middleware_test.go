@@ -9,10 +9,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/uair10/url_shortener_go/internal/httpapi/requestid"
 )
@@ -60,9 +63,7 @@ func parseLog(t *testing.T, buf *bytes.Buffer) []logEntry {
 	var entries []logEntry
 	for line := range bytes.Lines(buf.Bytes()) {
 		var e logEntry
-		if err := json.Unmarshal(line, &e); err != nil {
-			t.Fatalf("log line is not JSON: %v\n%s", err, line)
-		}
+		require.NoError(t, json.Unmarshal(line, &e), "log line is not JSON: %s", line)
 		entries = append(entries, e)
 	}
 	return entries
@@ -137,12 +138,10 @@ func TestAccessLogFields(t *testing.T) {
 			newTestHandler(&buf).ServeHTTP(rec, req)
 
 			lines := accessLines(parseLog(t, &buf))
-			if len(lines) != 1 {
-				t.Fatalf("access log lines = %d, want 1:\n%s", len(lines), buf.String())
-			}
+			require.Len(t, lines, 1, "access log lines, log:\n%s", buf.String())
 			checkAccessLine(t, lines[0], rec, logEntry{Method: tt.method, Path: tt.wantPath, Status: tt.wantStatus})
-			if tt.secret != "" && strings.Contains(buf.String(), tt.secret) {
-				t.Errorf("log contains %q:\n%s", tt.secret, buf.String())
+			if tt.secret != "" {
+				assert.NotContains(t, buf.String(), tt.secret, "secret in log")
 			}
 		})
 	}
@@ -152,21 +151,15 @@ func TestAccessLogFields(t *testing.T) {
 // размер - с телом ответа, request_id - с заголовком ответа.
 func checkAccessLine(t *testing.T, got logEntry, rec *httptest.ResponseRecorder, want logEntry) {
 	t.Helper()
-	if got.DurationMS == nil {
-		t.Error("duration_ms is missing")
+	assert.NotNil(t, got.DurationMS, "duration_ms")
+	if assert.NotNil(t, got.Bytes, "bytes") {
+		assert.EqualValues(t, rec.Body.Len(), *got.Bytes, "bytes must match response body size")
 	}
-	if got.Bytes == nil {
-		t.Error("bytes is missing")
-	} else if *got.Bytes != int64(rec.Body.Len()) {
-		t.Errorf("bytes = %d, want %d (response body size)", *got.Bytes, rec.Body.Len())
-	}
-	if id := rec.Header().Get(requestid.Header); got.RequestID == "" || got.RequestID != id {
-		t.Errorf("request_id = %q, want %q (from response header)", got.RequestID, id)
-	}
-	if got.Method != want.Method || got.Path != want.Path || got.Status != want.Status {
-		t.Errorf("method, path, status = %s %s %d, want %s %s %d",
-			got.Method, got.Path, got.Status, want.Method, want.Path, want.Status)
-	}
+	assert.NotEmpty(t, got.RequestID, "request_id")
+	assert.Equal(t, rec.Header().Get(requestid.Header), got.RequestID, "request_id must match response header")
+	assert.Equal(t, want.Method, got.Method, "method")
+	assert.Equal(t, want.Path, got.Path, "path")
+	assert.Equal(t, want.Status, got.Status, "status")
 }
 
 // BR-4.5: GET /healthz не пишется в access log.
@@ -182,12 +175,8 @@ func TestAccessLogSkipsHealthz(t *testing.T) {
 			newTestHandler(&buf).ServeHTTP(rec,
 				httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, http.NoBody))
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200", rec.Code)
-			}
-			if lines := accessLines(parseLog(t, &buf)); len(lines) != 0 {
-				t.Errorf("healthz is in access log:\n%s", buf.String())
-			}
+			require.Equal(t, http.StatusOK, rec.Code)
+			assert.Empty(t, accessLines(parseLog(t, &buf)), "healthz is in access log")
 		})
 	}
 }
@@ -225,12 +214,12 @@ func TestRequestIDHeader(t *testing.T) {
 			handler.ServeHTTP(rec, req)
 
 			got := rec.Header().Get(requestid.Header)
-			if tt.wantSame && got != tt.incoming {
-				t.Errorf("%s = %q, want %q", requestid.Header, got, tt.incoming)
+			if tt.wantSame {
+				assert.Equal(t, tt.incoming, got, "%s must be reused", requestid.Header)
+				return
 			}
-			if !tt.wantSame && (got == tt.incoming || !requestid.Valid(got)) {
-				t.Errorf("%s = %q, want new valid id", requestid.Header, got)
-			}
+			assert.NotEqual(t, tt.incoming, got, "%s must be regenerated", requestid.Header)
+			assert.True(t, requestid.Valid(got), "generated %s = %q is not valid", requestid.Header, got)
 		})
 	}
 }
@@ -245,9 +234,7 @@ func TestRequestIDGeneratedUnique(t *testing.T) {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ok", http.NoBody))
 		id := rec.Header().Get(requestid.Header)
-		if seen[id] {
-			t.Fatalf("duplicate request id %q", id)
-		}
+		require.False(t, seen[id], "duplicate request id %q", id)
 		seen[id] = true
 	}
 }
@@ -280,16 +267,10 @@ func TestRequestIDPropagation(t *testing.T) {
 			rec := httptest.NewRecorder()
 			newTestHandler(&buf).ServeHTTP(rec, req)
 
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
-			}
-			if got := rec.Header().Get(requestid.Header); got != id {
-				t.Errorf("%s = %q, want %q", requestid.Header, got, id)
-			}
+			require.Equal(t, tt.wantStatus, rec.Code)
+			assert.Equal(t, id, rec.Header().Get(requestid.Header), "response header")
 			if rec.Code >= http.StatusBadRequest {
-				if got := decodeProblem(t, rec)["request_id"]; got != id {
-					t.Errorf("body request_id = %v, want %q", got, id)
-				}
+				assert.Equal(t, id, decodeProblem(t, rec)["request_id"], "body request_id")
 			}
 			checkLogRequestID(t, &buf, id, tt.wantLines)
 		})
@@ -300,13 +281,9 @@ func TestRequestIDPropagation(t *testing.T) {
 func checkLogRequestID(t *testing.T, buf *bytes.Buffer, id string, wantLines int) {
 	t.Helper()
 	entries := parseLog(t, buf)
-	if len(entries) != wantLines {
-		t.Errorf("log lines = %d, want %d:\n%s", len(entries), wantLines, buf.String())
-	}
-	for _, e := range entries {
-		if e.RequestID != id {
-			t.Errorf("log line %q: request_id = %q, want %q", e.Msg, e.RequestID, id)
-		}
+	assert.Len(t, entries, wantLines, "log lines, log:\n%s", buf.String())
+	for i, e := range entries {
+		assert.Equal(t, id, e.RequestID, "log line %d (%q): request_id", i, e.Msg)
 	}
 }
 
@@ -320,52 +297,33 @@ func TestRecoverPanic(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	status, body := doGet(t, srv.URL+"/panic")
-	if status != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", status)
-	}
+	require.Equal(t, http.StatusInternalServerError, status)
 	var problem map[string]any
-	if err := json.Unmarshal(body, &problem); err != nil {
-		t.Fatalf("body is not JSON: %v\n%s", err, body)
-	}
-	if problem["code"] != "internal" {
-		t.Errorf("code = %v, want internal", problem["code"])
-	}
+	require.NoError(t, json.Unmarshal(body, &problem), "body is not JSON: %s", body)
+	assert.Equal(t, "internal", problem["code"], "field code")
 	// NFR-7: ни текст паники, ни стек клиенту не уходят.
-	if bytes.Contains(body, []byte("secret-panic")) || bytes.Contains(body, []byte("goroutine")) {
-		t.Errorf("response leaks panic details: %s", body)
-	}
+	assert.NotContains(t, string(body), "secret-panic", "response leaks panic text")
+	assert.NotContains(t, string(body), "goroutine", "response leaks stack")
 
-	var stackLogged bool
-	for _, e := range parseLog(t, &buf) {
-		if e.Msg == "panic" && strings.Contains(e.Stack, "goroutine") {
-			stackLogged = true
-		}
-	}
-	if !stackLogged {
-		t.Errorf("no panic line with stack in log:\n%s", buf.String())
-	}
+	assert.True(t, slices.ContainsFunc(parseLog(t, &buf), func(e logEntry) bool {
+		return e.Msg == "panic" && strings.Contains(e.Stack, "goroutine")
+	}), "no panic line with stack in log:\n%s", buf.String())
 
 	// Следующий запрос к тому же серверу успешен.
-	if status, body := doGet(t, srv.URL+"/ok"); status != http.StatusOK || string(body) != okBody {
-		t.Errorf("next request = %d %q, want 200 %q", status, body, okBody)
-	}
+	status, body = doGet(t, srv.URL+"/ok")
+	assert.Equal(t, http.StatusOK, status, "next request status")
+	assert.Equal(t, okBody, string(body), "next request body")
 }
 
 // doGet делает GET-запрос и возвращает код и тело ответа.
 func doGet(t *testing.T, url string) (int, []byte) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
+	require.NoError(t, err, "new request")
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("GET %s: %v", url, err)
-	}
+	require.NoError(t, err, "GET %s", url)
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
+	require.NoError(t, err, "read body")
 	return resp.StatusCode, body
 }
