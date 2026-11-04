@@ -40,6 +40,17 @@ func (p *Problem) Error() string {
 	return p.Code + ": " + p.Detail
 }
 
+// GetStatus возвращает HTTP статус код Problem.
+func (p *Problem) GetStatus() int {
+	if p.Status == 0 {
+		return http.StatusInternalServerError
+	}
+	return p.Status
+}
+
+// ContentType сообщает Huma тип ответа-ошибки (RFC 9457), в том числе для схемы в OpenAPI.
+func (*Problem) ContentType(string) string { return "application/problem+json" }
+
 // Write сериализует проблему в ответ. p не меняется: значения по умолчанию
 // заполняются в копии, поэтому одну проблему можно писать из разных горутин.
 func (p *Problem) Write(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +76,7 @@ func (p *Problem) Write(w http.ResponseWriter, r *http.Request) {
 		out.RequestID = requestid.From(r.Context())
 	}
 
-	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
+	w.Header().Set("Content-Type", "application/problem+json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	if out.RetryAfter > 0 {

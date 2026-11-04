@@ -11,14 +11,15 @@ type Code string
 
 // Коды из справочника ошибок (SPEC, раздел 6). В комментарии - HTTP-статус.
 const (
+	CodeBadRequest           Code = "bad_request"            // 400 (общий, для неизвестных 4xx)
 	CodeMalformedJSON        Code = "malformed_json"         // 400
-	CodeInvalidQuery         Code = "invalid_query"          // 400
 	CodeValidationFailed     Code = "validation_failed"      // 422
 	CodeUnauthorized         Code = "unauthorized"           // 401
 	CodeForbidden            Code = "forbidden"              // 403
 	CodeQuotaExceeded        Code = "quota_exceeded"         // 403
 	CodeNotFound             Code = "not_found"              // 404
 	CodeMethodNotAllowed     Code = "method_not_allowed"     // 405
+	CodeRequestTimeout       Code = "request_timeout"        // 408
 	CodeAliasTaken           Code = "alias_taken"            // 409
 	CodeEmailTaken           Code = "email_taken"            // 409
 	CodeLinkGone             Code = "link_gone"              // 410
@@ -39,14 +40,15 @@ type codeInfo struct {
 // codes - единственный источник истины для HTTP-статуса и заголовка.
 // Только для чтения: менять в рантайме нельзя.
 var codes = map[Code]codeInfo{ //nolint:gochecknoglobals // read-only lookup table
+	CodeBadRequest:           {http.StatusBadRequest, "Bad Request"},
 	CodeMalformedJSON:        {http.StatusBadRequest, "Malformed JSON"},
-	CodeInvalidQuery:         {http.StatusBadRequest, "Invalid Query"},
 	CodeValidationFailed:     {http.StatusUnprocessableEntity, "Validation Failed"},
 	CodeUnauthorized:         {http.StatusUnauthorized, "Unauthorized"},
 	CodeForbidden:            {http.StatusForbidden, "Forbidden"},
 	CodeQuotaExceeded:        {http.StatusForbidden, "Quota Exceeded"},
 	CodeNotFound:             {http.StatusNotFound, "Not Found"},
 	CodeMethodNotAllowed:     {http.StatusMethodNotAllowed, "Method Not Allowed"},
+	CodeRequestTimeout:       {http.StatusRequestTimeout, "Request Timeout"},
 	CodeAliasTaken:           {http.StatusConflict, "Alias Taken"},
 	CodeEmailTaken:           {http.StatusConflict, "Email Taken"},
 	CodeLinkGone:             {http.StatusGone, "Link Gone"},

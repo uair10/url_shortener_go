@@ -1,10 +1,20 @@
 package httpapi
 
 import (
-	"net/http"
+	"context"
 )
 
-func healthz(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
+type healthzBody struct {
+	Status string `json:"status" example:"ok"`
+}
+
+type healthzOutput struct {
+	Body healthzBody
+}
+
+// healthzHumaHandler — /healthz через Huma: попадает в спеку, валидация тривиальна.
+func healthzHumaHandler(_ context.Context, _ *struct{}) (*healthzOutput, error) {
+	out := &healthzOutput{}
+	out.Body.Status = "ok"
+	return out, nil
 }
